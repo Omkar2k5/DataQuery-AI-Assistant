@@ -1,5 +1,3 @@
-import axios from 'axios';
-
 export interface DataSchema {
   tableName: string;
   columns: Array<{ name: string; type: string }>;
@@ -228,9 +226,12 @@ export const analyzeData = async (
       }
 
       return result;
-    } catch (analysisError) {
+    } catch (analysisError: unknown) {
       console.error('Error during data analysis:', analysisError);
-      throw new Error(`Analysis failed: ${analysisError instanceof Error ? analysisError.message : 'Unknown error'}`);
+      const errorMessage = analysisError instanceof Error 
+        ? analysisError.message 
+        : 'Unknown analysis error';
+      throw new Error(`Analysis failed: ${errorMessage}`);
     }
   } catch (error) {
     console.error('Error in analyzeData:', error);

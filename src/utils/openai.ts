@@ -1,14 +1,7 @@
 import axios from 'axios';
-import axiosError from 'axios';
+
 const OLLAMA_API_URL = 'http://localhost:11434/api/generate';
 const MODEL_NAME = 'qwen2.5-coder:7b';
-import error from 'axios';
-
-interface OllamaResponse {
-  response?: string;
-  error?: string;
-  context?: number[];
-}
 
 interface AnalysisResult {
   answer: string;
@@ -31,206 +24,142 @@ export const analyzeDataWithAI = async (
   schema: any,
   data: any[]
 ) => {
+  // Handle greeting messages
+  const greetings = ['hi', 'hello', 'hey', 'greetings'];
+  if (greetings.includes(query.toLowerCase().trim())) {
+    return {
+      answer: "Hello! I'm your data analysis assistant. You can ask me questions about your data, and I'll help you analyze it. For example, try asking about specific columns, averages, trends, or distributions in your data.",
+      sqlQuery: '',
+      needsChart: false,
+      chartType: null,
+      chartDataColumn: '',
+      chartData: []
+    };
+  }
+
   // Analyze schema and column sizes
   const schemaInfo = schema.columns.map((col: { name: string; type: string }) => {
     const uniqueValues = new Set();
+    const valueCounts: { [key: string]: number } = {};
+    
     data.forEach(item => {
       if (item[col.name] !== undefined && item[col.name] !== null) {
-        uniqueValues.add(item[col.name]);
+        const value = String(item[col.name]);
+        uniqueValues.add(value);
+        valueCounts[value] = (valueCounts[value] || 0) + 1;
       }
     });
+
     return {
       name: col.name,
       type: col.type,
       uniqueCount: uniqueValues.size,
-      totalCount: data.length
+      totalCount: data.length,
+      valueCounts: valueCounts
     };
   });
+
   try {
     // Construct the prompt for Ollama
-    const prompt = `
-      You are a data analysis assistant specialized in SQL query generation and natural language explanations. Given the following dataset schema and user query, analyze the data and provide both a natural language answer and a SQL query.
+    const prompt = `You are a data analysis assistant specialized in SQL query generation and natural language explanations. 
+    Analyze the following dataset and question:
 
-      Schema:
-      ${JSON.stringify(schema, null, 2)}
+    Schema:
+    ${JSON.stringify(schema, null, 2)}
 
-      Sample Data (first 5 rows):
-      ${JSON.stringify(data.slice(0, 5), null, 2)}
+    Sample Data (first 5 rows):
+    ${JSON.stringify(data.slice(0, 5), null, 2)}
 
-      User Query:
-      ${query}
+    Column Statistics:
+    ${JSON.stringify(schemaInfo, null, 2)}
 
-      Analyze the data and provide both a natural language explanation and a SQL query that answers the user's question.
-      
-      Respond strictly in JSON format using this structure:
+    User Question:
+    ${query}
+
+    Provide a response in the following JSON format only:
+    {
+      "answer": "A clear, conversational explanation including specific values and counts from the data",
+      "sqlQuery": "The SQL query to get the results",
+      "visualization": "pie, bar, or line"
+    }
+
+    For categorical questions (like types, categories, etc):
+    1. Include ALL unique values and their counts in the answer
+    2. Format numbers with commas for readability
+    3. Use bullet points for lists
+    4. Suggest appropriate visualizations
+
+    Keep the response format strictly as JSON.`;
+
+    // Send request to Ollama
+    const response = await axios.post(
+      OLLAMA_API_URL,
       {
-        "answer": "A clear, natural language explanation of the analysis results",  
-        "sqlQuery": "The SQL query that answers the question",
-        "needsChart": boolean,
-        "chartType": "pie" | "bar" | "line" | null,
-        "chartDataColumn": "string"
-      }
-
-      Guidelines:
-      1. The answer field should contain a clear, natural language explanation of the analysis.
-      2. The sqlQuery field should contain the SQL query that answers the question.
-      3. If the analysis would benefit from visualization, set needsChart to true and specify appropriate chart settings.
-      4. Ensure your response is valid JSON and includes all required fields.
-    `;
-
-    console.log("🚀 Sending request to Ollama...");
-    console.log("📝 Request payload:", {
-      model: MODEL_NAME,
-      prompt: prompt.slice(0, 100) + "..." // Log truncated prompt for readability
-    });
-
-    let response;
-    try {
-      response = await axios.post<OllamaResponse>(
-        OLLAMA_API_URL,
-        {
-          model: MODEL_NAME,
-          prompt,
-          stream: false
+        model: MODEL_NAME,
+        prompt,
+        stream: false
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
         },
-        {
-          headers: {
-            "Content-Type": "application/json",
-          },
-          timeout: 30000, // 30 second timeout
-        }
-      );
-
-      if (response.data.error) {
-        throw new Error(response.data.error);
+        timeout: 30000,
       }
+    );
 
-      // Parse the response and ensure it includes chart data
-      const result = JSON.parse(response.data.response || '{}');
-      
-      // If chart is needed but no chart data is provided, generate sample data
-      if (result.needsChart && !result.chartData) {
-        const selectedColumn = result.chartDataColumn || schema.columns[0].name;
-        const aggregatedData = new Map<string, number>();
-
-        // Aggregate data based on the selected column
-        data.forEach(row => {
-          const key = String(row[selectedColumn] || 'Unknown');
-          aggregatedData.set(key, (aggregatedData.get(key) || 0) + 1);
-        });
-
-        // Convert aggregated data to chart format
-        result.chartData = Array.from(aggregatedData.entries()).map(([name, value]) => ({
-          name,
-          value
-        }));
-      }
-
-      return result;
-    } catch (error) {
-      if (axios.isAxiosError(axiosError)) {
-        if (axiosError.code === 'ECONNREFUSED') {
-          throw new Error(
-            "Could not connect to Ollama. Please ensure Ollama is running on port 11434."
-          );
-        }
-        if (axiosError.response) {
-          // Server responded with error
-          console.error("❌ Ollama API Error Response:", {
-            status: axiosError.response.status,
-            data: axiosError.response.data
-          });
-          throw new Error(
-            `Ollama API error (${axiosError.response.status}): ${
-              axiosError.response.data?.error || 'Unknown error'
-            }`
-          );
-        } else if (axiosError.request) {
-          // Request made but no response
-          console.error("❌ No response received from Ollama");
-          throw new Error(
-            "No response received from Ollama. The request timed out or failed."
-          );
-        }
-        throw new Error(`Network error: ${axiosError.message}`);
-      }
-      throw axiosError; // Re-throw if not an axios error
+    if (!response.data || !response.data.response) {
+      throw new Error("Invalid response from Ollama");
     }
 
-    console.log("🔄 Ollama Response:", {
-      status: response.status,
-      headers: response.headers,
-      data: response.data
-    });
+    const llmResponse = response.data.response;
+    console.log("📝 LLM Response:", llmResponse);
 
-    if (!response.data) {
-      throw new Error("Empty response received from Ollama.");
-    }
+    // Extract SQL query if present in the response
+    const sqlMatch = llmResponse.match(/```sql\n([\s\S]*?)\n```/);
+    const sqlQuery = sqlMatch ? sqlMatch[1].trim() : '';
 
-    if (response.data.error) {
-      throw new Error(`Ollama error: ${response.data.error}`);
-    }
+    // Create the result object
+    const result: AnalysisResult = {
+      answer: llmResponse.replace(/```sql\n[\s\S]*?\n```/g, '').trim(), // Remove SQL code blocks
+      sqlQuery: sqlQuery,
+      needsChart: llmResponse.toLowerCase().includes('visualiz') || llmResponse.toLowerCase().includes('chart'),
+      chartType: determineChartType(llmResponse),
+      chartDataColumn: determineChartColumn(llmResponse, schema.columns)
+    };
 
-    if (!response.data.response) {
-      throw new Error(
-        "Invalid response format: Missing 'response' field in Ollama response."
-      );
-    }
-
-    // Extract and parse the JSON response
-    const resultText = response.data.response;
-    console.log("📝 Raw response text:", resultText);
-
-    let result: AnalysisResult;
-    try {
-      // Find JSON content between curly braces
-      const jsonMatch = resultText.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        console.error("❌ No JSON found in response text:", resultText);
-        throw new Error("No JSON found in Ollama response");
-      }
-      const jsonStr = jsonMatch[0];
-      console.log("🔍 Extracted JSON string:", jsonStr);
-      
-      const parsed = JSON.parse(jsonStr) as AnalysisResult;
-      
-      // Validate required fields
-      const requiredFields = ['answer', 'sqlQuery', 'needsChart', 'chartType', 'chartDataColumn'] as const;
-      const missingFields = requiredFields.filter(field => !(field in parsed));
-      
-      if (missingFields.length > 0) {
-        throw new Error(`Missing required fields in response: ${missingFields.join(', ')}`);
-      }
-
-      result = parsed;
-
-    } catch (parseError) {
-      console.error("❌ JSON Parsing Error:", parseError);
-      console.log("📝 Raw Response Content:", resultText);
-      throw new Error(
-        `Failed to parse Ollama response: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`
-      );
-    }
-
-    // If chart is needed, process chart data
+    // Add chart data if needed
     if (result.needsChart && result.chartDataColumn) {
-      try {
-        result.chartData = processDataForChart(data, result.chartDataColumn);
-      } catch (chartError) {
-        console.error("❌ Chart Data Processing Error:", chartError);
-        throw new Error(
-          `Failed to process chart data: ${chartError instanceof Error ? chartError.message : 'Unknown error'}`
-        );
-      }
+      result.chartData = processDataForChart(data, result.chartDataColumn);
     }
 
     return result;
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("❌ Error in analyzeDataWithAI:", error);
-    // Ensure we always return an error with a readable message
-    throw error instanceof Error 
-      ? error 
-      : new Error('An unexpected error occurred while analyzing data');
+    
+    // Handle errors more gracefully
+    if (!schema || !schema.columns) {
+      return {
+        answer: "Please upload a dataset first. I'll be happy to help you analyze it once you do!",
+        sqlQuery: '',
+        needsChart: false,
+        chartType: null,
+        chartDataColumn: '',
+        chartData: []
+      };
+    }
+    
+    const errorMessage = error instanceof Error 
+      ? error.message 
+      : 'An unexpected error occurred while analyzing data';
+      
+    return {
+      answer: `I apologize, but I encountered an issue while processing your request. ${errorMessage}. Please try asking a more specific question about your data.`,
+      sqlQuery: '',
+      needsChart: false,
+      chartType: null,
+      chartDataColumn: '',
+      chartData: []
+    };
   }
 };
 
@@ -284,4 +213,29 @@ const processDataForChart = (data: any[], column: string) => {
     .map(([name, value]) => ({ name, value }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 10); // Limit to top 10 categories
+};
+
+// Helper function to determine chart type from LLM response
+const determineChartType = (response: string): 'pie' | 'bar' | 'line' | null => {
+  const responseLower = response.toLowerCase();
+  if (responseLower.includes('pie chart')) return 'pie';
+  if (responseLower.includes('bar chart') || responseLower.includes('histogram')) return 'bar';
+  if (responseLower.includes('line chart') || responseLower.includes('trend')) return 'line';
+  return null;
+};
+
+// Helper function to determine which column to visualize
+const determineChartColumn = (response: string, columns: Array<{ name: string; type: string }>): string => {
+  const responseLower = response.toLowerCase();
+  
+  // Try to find a mentioned column name in the response
+  for (const column of columns) {
+    if (responseLower.includes(column.name.toLowerCase())) {
+      return column.name;
+    }
+  }
+  
+  // Default to the first numeric column if no match found
+  const numericColumn = columns.find(col => col.type === 'number');
+  return numericColumn ? numericColumn.name : columns[0].name;
 };
