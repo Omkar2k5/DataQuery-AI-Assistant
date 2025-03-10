@@ -47,9 +47,9 @@ interface SpeechRecognitionConstructor {
 }
 
 declare global {
-  interface Window {
-    SpeechRecognition: SpeechRecognitionConstructor;
-    webkitSpeechRecognition: SpeechRecognitionConstructor;
+interface Window {
+  SpeechRecognition: SpeechRecognitionConstructor;
+  webkitSpeechRecognition: SpeechRecognitionConstructor;
   }
 }
 
@@ -390,64 +390,40 @@ function App() {
       // Then analyze data for visualization
       const result = await analyzeQuery(query);
       
-      // Format the response to be more user-friendly
-      let formattedAnswer = result.answer;
-      
-      // Format count/total responses
-      if (query.toLowerCase().includes('how many') || query.toLowerCase().includes('count')) {
-        if (result.answer.includes('Distribution')) {
-          // For distribution queries, keep the detailed breakdown but add a total
-          const counts = result.answer.match(/\d+/g);
-          const total = counts ? counts.reduce((a, b) => a + parseInt(b), 0) : 0;
-          formattedAnswer = `There are ${total.toLocaleString()} total rows in the data.\n\nBreakdown by category:\n${result.answer}`;
-        } else {
-          // For simple count queries
-          const count = result.answer.match(/\d+/)?.[0] || '0';
-          formattedAnswer = `There are ${parseInt(count).toLocaleString()} rows in the data.`;
-        }
-      }
+      // Add assistant's response to conversation
+      setConversation(prev => [...prev, {
+        role: 'assistant',
+        content: llmData.answer || result.answer
+      }]);
 
-      // Add the assistant's response to the conversation with formatted answer
-      setConversation([
-        ...conversation,
-        { 
-          role: 'assistant' as const, 
-          content: formattedAnswer
-        }
-      ]);
-
-      // Keep both the natural language answer and SQL query in the results
+      // Update query result with both LLM response and visualization data
       setQueryResult({
         ...result,
-        answer: formattedAnswer
+        answer: llmData.answer || result.answer,
+        sqlQuery: llmData.sqlQuery || result.sqlQuery,
+        chartType: llmData.visualization || result.chartType
       });
-      setQuery(''); // Clear the input
+
+      setQuery('');
     } catch (error) {
       console.error('Query analysis failed:', error);
       
-      // Add error message to conversation with more helpful context
       const errorMessage = error instanceof Error 
-        ? `I couldn't understand that query. ${error.message}\n\nTip: You can ask questions about the columns: tweet_text and cyberbullying_type.`
-        : 'Something went wrong. Please try rephrasing your question.';
+        ? `I apologize, but I encountered an error while processing your query: ${error.message}`
+        : 'I apologize, but something went wrong. Could you please rephrase your question?';
 
-      setConversation([
-        ...conversation,
-        { 
-          role: 'assistant' as const, 
-          content: errorMessage
-        }
-      ]);
+      setConversation(prev => [...prev, {
+        role: 'assistant',
+        content: errorMessage
+      }]);
 
-      // Set error result
-      const errorResult: QueryResult = {
+      setQueryResult({
         answer: errorMessage,
         sqlQuery: '',
         needsChart: false,
         chartType: null,
         chartDataColumn: ''
-      };
-
-      setQueryResult(errorResult);
+      });
     } finally {
       setIsAnalyzing(false);
     }
@@ -462,70 +438,81 @@ function App() {
       format: 'a4'
     });
 
-    // Add title and header
+    // Add title header
     pdf.setFillColor(66, 102, 241);
     pdf.rect(0, 0, pdf.internal.pageSize.getWidth(), 15, 'F');
     pdf.setTextColor(255, 255, 255);
     pdf.setFontSize(16);
     pdf.text('DataQuery AI Assistant Report', 20, 10);
 
-    // Add timestamp
-    pdf.setFontSize(8);
-    pdf.setTextColor(200, 200, 200);
-    pdf.text(`Generated on: ${new Date().toLocaleString()}`, pdf.internal.pageSize.getWidth() - 60, 10);
-
     let yOffset = 25;
 
-    // Add conversation history section
-    pdf.setFillColor(240, 242, 245);
+    // Improved conversation history section
+    pdf.setFillColor(245, 247, 250);
     pdf.rect(15, yOffset, pdf.internal.pageSize.getWidth() - 30, 10, 'F');
     pdf.setTextColor(66, 102, 241);
     pdf.setFontSize(12);
     pdf.text('Chat History', 20, yOffset + 7);
     yOffset += 15;
 
-    // Add conversation content with improved styling
+    // Add conversation content with natural language styling
     pdf.setTextColor(0, 0, 0);
     pdf.setFontSize(10);
     conversation.forEach((message) => {
-      // Improved role labels
-      const role = message.role === 'user' ? '👤 You' : '🤖 Assistant';
-      const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const role = message.role === 'user' ? 'User' : 'DataQuery AI Assistant';
       
-      // Format the message content
-      let content = message.content;
-      if (message.role === 'assistant') {
-        // Add some personality to assistant responses
-        content = content.replace(/^I /g, "I'll ")
-                        .replace(/^Here/g, "Sure! Here")
-                        .replace(/^The /g, "Based on the data, the ");
-      }
+      // Clean up the message content
+      let content = message.content
+        .replace(/Ø[=>][\Ý\Üd]\s*/g, '')
+        .replace(/\(\d{1,2}:\d{2}\s*(?:AM|PM)\):\s*/g, '')
+        .replace(/^(?:You|Assistant):\s*/g, '')
+        .trim();
       
-      const lines = pdf.splitTextToSize(`${role} (${timestamp}): ${content}`, 165);
+      const lines = pdf.splitTextToSize(`${role}: ${content}`, 165);
       
-      // Add message box with improved styling
+      // Add message bubble with improved styling
       pdf.setDrawColor(200, 200, 200);
-      if (message.role === 'user') {
-        pdf.setFillColor(235, 242, 254); // Light blue for user
-      } else {
-        pdf.setFillColor(240, 255, 244); // Light green for assistant
-      }
+      pdf.setFillColor(
+        message.role === 'user' ? 235 : 240,
+        message.role === 'user' ? 242 : 255,
+        message.role === 'user' ? 254 : 244
+      );
       
-      const boxHeight = (lines.length * 5) + 8; // Increased padding
-      pdf.roundedRect(20, yOffset - 2, 170, boxHeight, 3, 3, 'FD'); // More rounded corners
+      const boxHeight = (lines.length * 5) + 8;
+      pdf.roundedRect(20, yOffset - 2, 170, boxHeight, 3, 3, 'FD');
       
-      // Check if we need to add a new page
-      if (yOffset + boxHeight > 270) {
-        pdf.addPage();
-        yOffset = 20;
-      }
-      
-      // Add message content with improved formatting
+      // Add message content
       lines.forEach((line: string, index: number) => {
         pdf.text(line, 25, yOffset + 3 + (index * 5));
       });
-      yOffset += boxHeight + 5; // Added more space between messages
+      yOffset += boxHeight + 5;
     });
+
+    // Add SQL Query section with clear separation
+    if (queryResult?.sqlQuery) {
+      const uniqueQueries = new Set();
+      const formattedQuery = formatSQLQuery(queryResult.sqlQuery);
+
+      if (!uniqueQueries.has(formattedQuery)) {
+        uniqueQueries.add(formattedQuery);
+        yOffset += 10;
+        pdf.setFillColor(245, 247, 250);
+        pdf.rect(15, yOffset, pdf.internal.pageSize.getWidth() - 30, 10, 'F');
+        pdf.setTextColor(66, 102, 241);
+        pdf.setFontSize(12);
+        pdf.text('Generated SQL Query', 20, yOffset + 7);
+        yOffset += 15;
+
+        // Format and add the SQL query
+        const queryLines = pdf.splitTextToSize(formattedQuery, 165);
+
+        pdf.setTextColor(0, 0, 0);
+        queryLines.forEach((line: string, index: number) => {
+          pdf.text(line, 25, yOffset + 3 + (index * 5));
+        });
+        yOffset += (queryLines.length * 5) + 10; // Adjust yOffset to prevent overlap
+      }
+    }
 
     // Update the query results section
     if (queryResult) {
@@ -535,37 +522,15 @@ function App() {
         yOffset = 20;
       }
 
-      // Query results header with improved styling
-      pdf.setFillColor(240, 242, 245);
-      pdf.rect(15, yOffset, pdf.internal.pageSize.getWidth() - 30, 10, 'F');
-      pdf.setTextColor(66, 102, 241);
-      pdf.setFontSize(12);
-      pdf.text('SQL Query Results', 20, yOffset + 7);
-      yOffset += 15;
-
-      // Format the SQL query with proper indentation and keywords
-      let formattedQuery = queryResult.sqlQuery || 'No SQL query available';
-      if (formattedQuery !== 'No SQL query available') {
-        formattedQuery = formatSQLQuery(formattedQuery);
-      }
-
-      const queryLines = pdf.splitTextToSize(formattedQuery, 165);
-      const queryBoxHeight = (queryLines.length * 5) + 10; // Added more padding
-      
-      // Add a title for the query
-      pdf.setTextColor(128, 128, 128);
-      pdf.text('Generated SQL Query:', 20, yOffset);
-      yOffset += 7;
-
-      // Add the query box
-      pdf.roundedRect(20, yOffset - 2, 170, queryBoxHeight, 3, 3, 'FD');
-      
-      // Add the query content
+      // Query content with improved styling
       pdf.setTextColor(0, 0, 0);
-      queryLines.forEach((line: string, index: number) => {
-        pdf.text(line, 25, yOffset + 3 + (index * 5));
-      });
-      yOffset += queryBoxHeight + 10;
+      pdf.setFontSize(10);
+      pdf.setDrawColor(200, 200, 200);
+      pdf.setFillColor(248, 250, 252); // Light gray background for SQL
+
+      
+      
+      
 
       // Add query execution time if available
       if (queryResult.executionTime) {
@@ -575,56 +540,65 @@ function App() {
       }
     }
 
-    // Add data visualization section
+    // Add Data Visualization section
     if (queryResult?.needsChart || selectedColumn) {
-      // Always start chart on a new page
+      // Always start chart on a new page for better layout
       pdf.addPage();
       yOffset = 20;
 
-      // Chart section header
+      // Add visualization section header
       pdf.setFillColor(240, 242, 245);
       pdf.rect(15, yOffset, pdf.internal.pageSize.getWidth() - 30, 10, 'F');
       pdf.setTextColor(66, 102, 241);
       pdf.setFontSize(12);
       pdf.text('Data Visualization', 20, yOffset + 7);
-      yOffset += 15;
+      yOffset += 20;
 
       // Capture and add the chart
-      const chartContainer = document.querySelector('.w-full.h-\\[400px\\]') as HTMLElement | null;
+      const chartContainer = document.querySelector('.w-full.h-\\[400px\\]') as HTMLElement;
       if (chartContainer) {
         try {
           // Wait for any animations to complete
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise(resolve => setTimeout(resolve, 1000));
 
-          // Set background for chart container
+          // Add white background for chart
           pdf.setFillColor(255, 255, 255);
-          pdf.setDrawColor(200, 200, 200);
-          pdf.roundedRect(15, yOffset, pdf.internal.pageSize.getWidth() - 30, 120, 2, 2, 'FD');
+          pdf.setDrawColor(200, 210, 230);
+          pdf.roundedRect(15, yOffset, pdf.internal.pageSize.getWidth() - 30, 120, 3, 3, 'FD');
 
-          // Capture chart with white background and better quality
+          // Capture the chart with improved settings
           const canvas = await html2canvas(chartContainer, {
             backgroundColor: '#FFFFFF',
-            scale: 2,
-            logging: true,
+            scale: 2, // Higher resolution
+            logging: false,
             useCORS: true,
             allowTaint: true,
             onclone: (clonedDoc) => {
-              const clonedChart = clonedDoc.querySelector('.w-full.h-\\[400px\\]') as HTMLElement | null;
+              const clonedChart = clonedDoc.querySelector('.w-full.h-\\[400px\\]') as HTMLElement;
               if (clonedChart) {
                 clonedChart.style.visibility = 'visible';
                 clonedChart.style.display = 'block';
                 clonedChart.style.height = '400px';
+                clonedChart.style.width = '100%';
+                clonedChart.style.backgroundColor = '#FFFFFF';
+                
+                // Ensure all chart elements are visible
+                const chartElements = clonedChart.querySelectorAll('.recharts-wrapper, .recharts-surface');
+                chartElements.forEach(el => {
+                  (el as HTMLElement).style.visibility = 'visible';
+                  (el as HTMLElement).style.display = 'block';
+                });
               }
             }
           });
 
           const imgData = canvas.toDataURL('image/png');
           
-          // Calculate dimensions to fit the chart
+          // Calculate dimensions to fit the chart properly
           const pageWidth = pdf.internal.pageSize.getWidth();
           const margin = 20;
           const maxWidth = pageWidth - (2 * margin);
-          const maxHeight = 120; // Increased height for better visibility
+          const maxHeight = 120;
           
           const imgWidth = canvas.width;
           const imgHeight = canvas.height;
@@ -639,13 +613,13 @@ function App() {
           
           const xOffset = (pageWidth - finalWidth) / 2;
           
-          // Add the chart image with proper positioning
+          // Add the chart image
           pdf.addImage(imgData, 'PNG', xOffset, yOffset + 5, finalWidth, finalHeight);
           
-          // Add chart type and column information
+          // Add chart information
           yOffset += finalHeight + 15;
           pdf.setFontSize(10);
-          pdf.setTextColor(128, 128, 128);
+          pdf.setTextColor(100, 100, 100);
           pdf.text(`Chart Type: ${chartType.toUpperCase()}`, 20, yOffset);
           if (selectedColumn) {
             pdf.text(`Selected Column: ${selectedColumn}`, 20, yOffset + 5);
@@ -657,9 +631,6 @@ function App() {
           pdf.text('Error capturing chart visualization', 20, yOffset + 10);
           pdf.text(`Error details: ${error instanceof Error ? error.message : 'Unknown error'}`, 20, yOffset + 15);
         }
-      } else {
-        pdf.setTextColor(128, 128, 128);
-        pdf.text('No chart visualization available', 20, yOffset + 10);
       }
     }
 
@@ -912,32 +883,27 @@ function App() {
                           <ChevronLeft className="h-4 w-4 mr-1" />
                           Previous
                         </button>
-                        <div className="flex items-center space-x-2">
-                          <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                            Page {currentPage} of {totalPages}
-                          </span>
-                          <div className="flex items-center space-x-1">
-                            <input
-                              type="number"
-                              min="1"
-                              max={totalPages}
-                              value={currentPage}
-                              onChange={(e) => {
-                                const value = parseInt(e.target.value);
-                                if (value >= 1 && value <= totalPages) {
-                                  setCurrentPage(value);
-                                }
-                              }}
-                              className={`w-16 px-2 py-1 text-sm border rounded-md ${
-                                darkMode
-                                  ? 'bg-gray-700 border-gray-600 text-gray-200'
-                                  : 'bg-white border-gray-300 text-gray-700'
-                              } focus:ring-2 focus:ring-indigo-500 focus:border-transparent`}
-                            />
-                            <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                              / {totalPages}
-                            </span>
-                          </div>
+                        <div className="flex items-center space-x-1">
+                          <input
+                            type="number"
+                            min="1"
+                            max={totalPages}
+                            value={currentPage}
+                            onChange={(e) => {
+                              const value = parseInt(e.target.value);
+                              if (value >= 1 && value <= totalPages) {
+                                setCurrentPage(value);
+                              }
+                            }}
+                            className={`w-16 px-2 py-1 text-sm border rounded-md ${
+                              darkMode
+                                ? 'bg-gray-700 border-gray-600 text-gray-200'
+                                : 'bg-white border-gray-300 text-gray-700'
+                            } focus:ring-2 focus:ring-indigo-500 focus:border-transparent`}
+                          />
+                        <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            / {totalPages}
+                        </span>
                         </div>
                         <button
                           onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
