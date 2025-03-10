@@ -150,7 +150,8 @@ export const analyzeData = async (
           throw new Error(`No data found for column: ${column.name}`);
         }
 
-        result.answer = `Distribution of ${column.name}:\n` +
+        result.answer = `Distribution of ${column.name}:
+` +
           Object.entries(occurrences)
             .map(([value, count]) => `${value}: ${count}`)
             .join('\n');

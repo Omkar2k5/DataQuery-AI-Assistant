@@ -67,8 +67,8 @@ export const analyzeDataWithAI = async (
     Schema:
     ${JSON.stringify(schema, null, 2)}
 
-    Sample Data (first 5 rows):
-    ${JSON.stringify(data.slice(0, 5), null, 2)}
+    Sample Data (first 10 rows):
+    ${JSON.stringify(data.slice(0, 10), null, 2)}
 
     Column Statistics:
     ${JSON.stringify(schemaInfo, null, 2)}
@@ -82,6 +82,8 @@ export const analyzeDataWithAI = async (
       "sqlQuery": "The SQL query to get the results",
       "visualization": "pie, bar, or line"
     }
+
+    For questions about specific patient IDs, ensure to match the 'Patient ID' column accurately and provide the associated 'Doctor Type'.
 
     For categorical questions (like types, categories, etc):
     1. Include ALL unique values and their counts in the answer

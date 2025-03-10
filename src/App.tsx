@@ -314,7 +314,7 @@ function App() {
       // Create context for the LLM
       const context = {
         schema: schema,
-        sampleData: data.slice(0, 5), // Send first 5 rows as sample
+        sampleData: data.slice(0, 10), // Send first 10 rows as sample
         availableColumns: schema?.columns.map(col => `${col.name} (${col.type})`).join(', '),
         currentQuery: query
       };
